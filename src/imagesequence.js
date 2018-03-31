@@ -1,10 +1,9 @@
 /**
- * TODO - Improve logic for reverse animations
- * TODO - Improve logic for horizontal vs. vertical
  * TODO - Random frame flag?
  * TODO - Improve external facing API
  * TODO - variable widths/heights
  * TODO - Tiled support
+ * TODO - pre-calculate and store all frames (prevents doing math every frame)
  */
 
 
@@ -26,6 +25,7 @@
  * @property {string} DIRECTION_HORIZONTAL reference to prevent magic.
  * @property {string} DIRECTION_VERTICAL reference to prevent magic.
  * @property {string} DIRECTION_DEFAULT The initial/fallback direction.
+ * @property {string} CLASS_NAME_REVERSED DOM class name to signify the sequence is reversed.
  */
 
 /**
@@ -46,6 +46,8 @@ class SpriteSequence {
       CLASS_NAME_ACTIVE: 'spritesequencer--active',
       CLASS_NAME_HORIZONTAL: 'spritesequencer--horizontal',
       CLASS_NAME_VERTICAL: 'spritesequencer--vertical',
+      CLASS_NAME_REVERSED: 'spritesequencer--reversed',
+      CLASS_NAME_GRAPHIC: 'spritesequencer__graphic',
 
       DIRECTION_AUTO: 'auto',
       DIRECTION_HORIZONTAL: 'horizontal',
@@ -79,10 +81,10 @@ class SpriteSequence {
    * @public
    *
    * @param {HTMLElement} element The element to transform.
-   * @param {number} value The translation amount in pixels.
+   * @param {string} value CSS Transform property value.
    */
   static transform(element, value) {
-    element.style.transform = `translateY(-${value})`;
+    element.style.transform = value;
   }
 
 
@@ -100,11 +102,11 @@ class SpriteSequence {
      *
      * @type {object}
      * @property {HTMLElement} container The containing element.
-     * @property {HTMLElement} graphic The graphical element to sequence.
+     * @property {?HTMLElement} graphic The graphical element to sequence.
      */
     this.elements = {
       container: container,
-      graphic: container.querySelector('.spritesequencer__graphic')
+      graphic: container.querySelector(`.${SpriteSequence.CONSTANTS().CLASS_NAME_GRAPHIC}`)
     };
 
     /**
@@ -124,9 +126,6 @@ class SpriteSequence {
      */
     this._direction = opt_direction;
 
-    // Automatically change the direction if unspecified.
-    if (this._direction === SpriteSequence.CONSTANTS().DIRECTION_AUTO) this._direction = this._calculateDirection();
-
     /**
      * Whether the animation should be in reverse.
      *
@@ -137,13 +136,31 @@ class SpriteSequence {
     this._reversed = opt_reverse;
 
     /**
-     * The currently active frame.
+     * Whether this instance is currently looping or not.
      *
-     * @type {number}
-     * @default 0
+     * @type {boolean}
+     * @readonly
      * @private
      */
-    this._frame = 0;
+    this._active = false;
+
+    /**
+     * Timer reference.
+     *
+     * @type {?null}
+     * @private
+     */
+    this._timer = null;
+
+    // Automatically change the direction if unspecified.
+    if (this._direction === SpriteSequence.CONSTANTS().DIRECTION_AUTO) this._direction = this._calculateDirection();
+    if (this._reversed) this.elements.container.classList.add(SpriteSequence.CONSTANTS().CLASS_NAME_REVERSED);
+
+    if (this._isHorizontal()) {
+      this.elements.container.classList.add(SpriteSequence.CONSTANTS().CLASS_NAME_HORIZONTAL);
+    } else {
+      this.elements.container.classList.add(SpriteSequence.CONSTANTS().CLASS_NAME_VERTICAL);
+    }
 
     /**
      * Frame information.
@@ -154,24 +171,17 @@ class SpriteSequence {
     this._frameInfo = {
       width: container.offsetWidth,
       height: container.offsetHeight,
-      count: (this.elements.graphic.offsetWidth / container.offsetWidth) - 1
+      count: this._getFrameCount()
     };
 
-
     /**
-     * Whether this instance is currently looping or not.
-     * @type {boolean}
-     * @readonly
+     * The currently active frame.
+     *
+     * @type {number}
+     * @default 0
      * @private
      */
-    this._active = false;
-
-    /**
-     * Instance-wide timer reference.
-     * @type {?null}
-     * @private
-     */
-    this._timer = null;
+    this._frame = this._initialFrame();
   }
 
 
@@ -218,6 +228,24 @@ class SpriteSequence {
   get reversed() {
     return this._reversed;
   }
+
+  /**
+   * Change the interval of this instance.
+   *
+   * @memberof SpriteSequence
+   * @since 0.0.2
+   * @public
+   *
+   * @param {number} interval The interval time in milliseconds.
+   */
+  set interval(interval) {
+    this.stop();
+
+    this._interval = interval;
+
+    this.start();
+  }
+
 
 
   /** State */
@@ -272,7 +300,7 @@ class SpriteSequence {
    */
   previous() {
     this._frame--;
-    this._calculateNextFrame();
+    this._calculateNextTransform();
   }
 
   /**
@@ -284,21 +312,25 @@ class SpriteSequence {
    */
   next() {
     this._frame++;
-    this._calculateNextFrame();
+    this._calculateNextTransform();
   }
 
-  _calculateNextFrame() {
-    // Check if the chosen frame is in our scope.
-    if (!this._frameIsInRange(this._frame)) {
-      // Set the frame to either the start or the end dependant on direction.
-      this._frame = this._reversed ? this._frameInfo.count : 0;
-    }
+  /**
+   * Calculate the transform value of the next frame.
+   *
+   * @memberof SpriteSequence
+   * @since 0.0.2
+   * @private
+   *
+   * @param {number] frame
+   */
+  _calculateNextTransform() {
+    if (!this._frameInRange(this._frame)) this._frame = this._initialFrame();
 
-    const y = this._frame * this._frameInfo.height;
+    const offset = this._frame * this._frameInfo.height;
+    const transform = this._isHorizontal() ? `translateX(-${offset}px)` : `translateY(-${offset}px)`;
 
-    const transformValue = this._direction === 'horizontal' ? `translateY(-${y}px)` : `translateX(-${y}px)`;
-
-    this.elements.graphic.style.transform = transformValue;
+    SpriteSequence.transform(this.elements.graphic, transform);
   }
 
 
@@ -314,7 +346,7 @@ class SpriteSequence {
    * @param {number] frame
    * @returns {boolean}
    */
-  _frameIsInRange(frame) {
+  _frameInRange(frame) {
     return frame >= 0 && frame <= this._frameInfo.count;
   }
 
@@ -332,11 +364,57 @@ class SpriteSequence {
 
     // Set our animation direction to horizontal if the width of the graphic element is larger than its height.
     if (this.elements.graphic.offsetWidth > this.elements.graphic.offsetHeight) {
-      direction = SpriteSequence.CONSTANTS().DIRECTION_VERTICAL;
-    } else {
       direction = SpriteSequence.CONSTANTS().DIRECTION_HORIZONTAL;
+    } else {
+      direction = SpriteSequence.CONSTANTS().DIRECTION_VERTICAL;
     }
 
     return direction;
+  }
+
+  /**
+   * Calculate the amount of frames in the sprite sheet.
+   *
+   * @memberof SpriteSequence
+   * @since 0.0.2
+   * @returns {number}
+   * @private
+   */
+  _getFrameCount() {
+    const {container, graphic} = this.elements;
+
+    let count = 0;
+
+    if (this._isHorizontal()) {
+      count = (graphic.offsetWidth / container.offsetWidth) - 1;
+    } else {
+      count = (graphic.offsetHeight / container.offsetHeight) - 1;
+    }
+
+    return count;
+  }
+
+  /**
+   * Checks whether the direction is horizontal.
+   *
+   * @memberof SpriteSequence
+   * @since 0.0.2
+   * @returns {boolean}
+   * @private
+   */
+  _isHorizontal() {
+    return this._direction === SpriteSequence.CONSTANTS().DIRECTION_HORIZONTAL;
+  }
+
+  /**
+   * Returns the number of the first frame.
+   *
+   * @memberof SpriteSequence
+   * @since 0.0.2
+   * @returns {number}
+   * @private
+   */
+  _initialFrame() {
+    return this._reversed ? this._frameInfo.count : 0;
   }
 }
