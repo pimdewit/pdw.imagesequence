@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Document</title>
+
+  <style>
+    #stepanimation {
+      position: relative;
+      width: 128px;
+      height: 128px;
+
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+
+<main>
+  <div id="stepanimation">
+    <img class="stepanimation__graphic" src="lorem.png"/>
+  </div>
+</main>
+
+<script src="StepAnimation.js"></script>
+<script>
+  const element = document.getElementById('stepanimation');
+  const sequence = new StepAnimation(element);
+
+  sequence.start();
+</script>
+</body>
+</html>
